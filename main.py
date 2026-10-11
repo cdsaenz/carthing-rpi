@@ -130,7 +130,9 @@ def main():
         this_device_name=os.getenv("SPOTIFY_DEVICE_NAME", ""),  # optional; defaults to matching "raspotify"
     )
     weather = WeatherProvider(api_key=os.getenv("API_KEY", ""))
-    dollar = DollarProvider()
+    # MEP dollar rate — an Argentina-specific exchange rate most people
+    # cloning this won't want; off unless explicitly enabled.
+    dollar = DollarProvider() if os.getenv("SHOW_MEP_RATE", "").lower() == "true" else None
     lms = LMSProvider(
         server_ip=os.getenv("LMS_SERVER_IP", "192.168.1.211"),
         player_name=os.getenv("LMS_PLAYER_NAME", "rpi3b"),
