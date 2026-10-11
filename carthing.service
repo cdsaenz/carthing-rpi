@@ -1,0 +1,15 @@
+[Unit]
+Description=CarThing Spotify Player
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=charly
+WorkingDirectory=/home/charly/carthing
+ExecStart=/home/charly/carthing/venv/bin/python /home/charly/carthing/main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
