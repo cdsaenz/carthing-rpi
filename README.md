@@ -24,6 +24,8 @@ Claude — the setup steps below are everything needed to reproduce it on
 the same hardware. Not actively maintained for contributions, but feel
 free to fork it.
 
+MIT licensed — use it, fork it, build on it, no need to ask.
+
 ## 1. Flash RPi OS Lite 64-bit (no desktop)
 
 ## 2. config.txt (/boot/firmware/config.txt)
