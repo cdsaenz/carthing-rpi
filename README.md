@@ -1,4 +1,28 @@
-# CarThing — Setup on RPi 3B + 5" HDMI LCD
+# CarThing
+
+A touchscreen media console for a Raspberry Pi 3B + 5" HDMI LCD, styled
+after Spotify's Car Thing. Runs full-screen with pygame-ce over KMSDRM (no
+desktop environment), and plays through a HiFiBerry DAC.
+
+It drives two sources at once — Spotify Connect (via raspotify) and a
+Logitech Media Server player (via squeezelite) — sharing the DAC through
+ALSA `dmix`, with a safety net that auto-pauses one source if the other
+starts playing. From the touchscreen you get:
+
+- A home/clock/weather screen with quick-pick album tiles when nothing's
+  playing (biased toward whatever artist you were last listening to)
+- Full now-playing screens for both sources, with shuffle — including a
+  genuine library-wide shuffle on the LMS side via RandomPlay, which
+  Spotify's API has no equivalent for
+- A library browser (Albums/Random/Playlists/Artists) with swipe paging,
+  on-disk caching, and a manual refresh
+- Tap-to-wake sleep, debounced touch handling, and a loading spinner for
+  anything that has to hit the network
+
+This is a personal project built out in a running conversation with
+Claude — the setup steps below are everything needed to reproduce it on
+the same hardware. Not actively maintained for contributions, but feel
+free to fork it.
 
 ## 1. Flash RPi OS Lite 64-bit (no desktop)
 
