@@ -2,7 +2,7 @@
 Now Playing screen — Car Thing style. Works with any provider exposing
 get_now_playing/get_cover/toggle_playback/next_track/prev_track/set_volume
 (SpotifyProvider or LMSProvider). The output-switch button only appears if
-the provider also has switch_output (Spotify-only — LMS playback is always
+the provider also has get_devices (Spotify-only — LMS playback is always
 local, nothing to switch to).
 
 Layout (800x480 landscape):
@@ -41,6 +41,7 @@ class NowPlayingScreen:
     MISS_TOLERANCE = 2  # consecutive empty polls before trusting "idle" — a
     # single flaky poll to a player on the LAN shouldn't bounce you back to
     # the home screen mid-playback.
+    DEVICE_HOLD_SECS = 0.5  # long-press on the output icon opens the device-picker overlay
     LIBRARY_SHUFFLE_COLOR = (255, 149, 40)  # orange — distinct from the
     # green queue-shuffle state, same tone as main.py's loading spinner
 
@@ -53,6 +54,9 @@ class NowPlayingScreen:
         self.volume_percent = 50
         self.toast_text = ""  # brief floating status pill (volume %, output switch result)
         self.toast_until = 0
+        self.device_overlay_open = False
+        self.device_entries = []  # last fetched Spotify Connect device list, for the overlay
+        self.device_buttons = []
         self.library_shuffle_on = False  # LMS-only third shuffle state; tracked here
         # since LMS has no query to read RandomPlay's status back reliably
 
@@ -207,7 +211,7 @@ class NowPlayingScreen:
         # Tap the cover to browse the library — routes to whichever
         # PlaylistsScreen instance matches this provider (Spotify vs LMS).
         if hasattr(self.player, "get_playlists"):
-            browse_action = "go_playlists" if hasattr(self.player, "switch_output") else "go_squeeze_library"
+            browse_action = "go_playlists" if hasattr(self.player, "get_devices") else "go_squeeze_library"
             self.buttons.append(TouchButton(
                 (COVER_X, COVER_Y, COVER_SIZE, COVER_SIZE), browse_action
             ))
@@ -366,8 +370,9 @@ class NowPlayingScreen:
 
         # Output device — far right, Spotify only (LMS playback is always
         # local, nothing to switch to). Ring = audio is currently playing on
-        # this Pi's DAC; tap to pull playback here, or (if already here) to go back.
-        if hasattr(self.player, "switch_output"):
+        # this Pi's DAC. Tap pulls playback here and plays; long-press opens
+        # the full device-picker overlay.
+        if hasattr(self.player, "get_devices"):
             out_x = center_x + OUTPUT_OFFSET
             if data.get("on_this_device"):
                 pygame.draw.circle(surface, theme.TEXT_PRIMARY, (out_x, cy), 30, 3)
@@ -375,7 +380,7 @@ class NowPlayingScreen:
             else:
                 draw_cast_icon(surface, (out_x, cy), 34, theme.TEXT_SECONDARY)
             self.buttons.append(TouchButton(
-                (out_x - OUTPUT_TOUCH // 2, cy - OUTPUT_TOUCH // 2, OUTPUT_TOUCH, OUTPUT_TOUCH), "switch_output"
+                (out_x - OUTPUT_TOUCH // 2, cy - OUTPUT_TOUCH // 2, OUTPUT_TOUCH, OUTPUT_TOUCH), "device"
             ))
 
         # Toast — briefly shown after a volume tap or output switch. Centered
@@ -394,14 +399,89 @@ class NowPlayingScreen:
                 toast_cx, pill_y + pad_y, anchor="center",
             )
 
-    def _source_label(self):
-        return "Spotify" if hasattr(self.player, "switch_output") else "LMS"
+        # Device-picker overlay — drawn last so it sits on top of everything.
+        if self.device_overlay_open:
+            self._draw_device_overlay(surface)
 
-    def handle_touch(self, pos):
+    def _draw_device_overlay(self, surface):
+        """Full-screen dim + a centered sheet listing Spotify Connect
+        devices, like Spotify's own device picker. Rebuilt every frame
+        since the device list can change between opens."""
+        W, H = theme.WIDTH, theme.HEIGHT
+        self.device_buttons = []
+
+        dim = pygame.Surface((W, H), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 180))
+        surface.blit(dim, (0, 0))
+
+        rows = self.device_entries
+        row_h = 64
+        pad = 20
+        sheet_w = 420
+        sheet_h = pad * 2 + max(1, len(rows)) * row_h
+        sheet_x = W // 2 - sheet_w // 2
+        sheet_y = H // 2 - sheet_h // 2
+
+        panel_color = theme.lerp_color((0, 0, 0), self.bg_color, 0.65)
+        pygame.draw.rect(surface, panel_color, (sheet_x, sheet_y, sheet_w, sheet_h), border_radius=24)
+
+        if not rows:
+            render_text(
+                surface, "No devices found", self.f_artist, theme.TEXT_SECONDARY,
+                W // 2, sheet_y + sheet_h // 2 - self.f_artist.get_height() // 2, anchor="center",
+            )
+            return
+
+        for i, dev in enumerate(rows):
+            row_y = sheet_y + pad + i * row_h
+            row_cy = row_y + row_h // 2
+            active = bool(dev.get("is_active"))
+            color = theme.ACCENT if active else theme.TEXT_PRIMARY
+            draw_cast_icon(surface, (sheet_x + 44, row_cy), 26, color if active else theme.TEXT_SECONDARY)
+            render_text(
+                surface, dev.get("name") or "Unknown device", self.f_artist, color,
+                sheet_x + 84, row_cy - self.f_artist.get_height() // 2,
+            )
+            self.device_buttons.append(TouchButton(
+                (sheet_x, row_y, sheet_w, row_h), f"select_device:{dev.get('id')}"
+            ))
+
+    def _source_label(self):
+        return "Spotify" if hasattr(self.player, "get_devices") else "LMS"
+
+    def handle_touch(self, pos, hold_secs=0):
         """Handle a touch/click event. Returns action name or None."""
+        if self.device_overlay_open:
+            return self._handle_overlay_touch(pos)
+
         for btn in self.buttons:
             if btn.hit(pos):
+                if btn.action == "device":
+                    if hold_secs >= self.DEVICE_HOLD_SECS:
+                        return self._open_device_overlay()
+                    return self._do_action("play_here")
                 return self._do_action(btn.action)
+        return None
+
+    def _open_device_overlay(self):
+        self.device_entries = self.player.get_devices() or []
+        self.device_overlay_open = True
+        return None
+
+    def _handle_overlay_touch(self, pos):
+        """Tap a device row to switch to it; tap anywhere else dismisses
+        the overlay without changing anything — same as Spotify's own
+        picker sheet."""
+        for btn in self.device_buttons:
+            if btn.hit(pos):
+                self.device_overlay_open = False
+                device_id = btn.action[len("select_device:"):]
+                ok = self.player.transfer_playback(device_id)
+                name = next((d.get("name") for d in self.device_entries if d.get("id") == device_id), "device")
+                self._show_toast(f"Switched to {name}" if ok else "Transfer failed", secs=2.5)
+                self.last_poll = time.time() - self.poll_interval + 1.5
+                return None
+        self.device_overlay_open = False
         return None
 
     def _do_action(self, action):
@@ -424,8 +504,8 @@ class NowPlayingScreen:
             self.volume_percent = min(100, self.volume_percent + self.VOLUME_STEP)
             self.player.set_volume(self.volume_percent)
             self._show_toast(f"{self.volume_percent}%")
-        elif action == "switch_output":
-            self._show_toast(self.player.switch_output(), secs=2.5)
+        elif action == "play_here":
+            self._show_toast(self.player.play_here(), secs=2.5)
             # Spotify takes a moment to report the new active device; look again shortly
             self.last_poll = time.time() - self.poll_interval + 1.5
         elif action == "shuffle":

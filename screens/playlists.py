@@ -289,7 +289,7 @@ class PlaylistsScreen:
         self.buttons.append(TouchButton((65, 0, 70, 55), "go_home"))
 
         draw_note_icon(surface, (172, icon_cy), 28, theme.TEXT_SECONDARY)
-        now_playing_action = "go_now_playing" if hasattr(self.player, "switch_output") else "go_squeeze"
+        now_playing_action = "go_now_playing" if hasattr(self.player, "get_devices") else "go_squeeze"
         self.buttons.append(TouchButton((140, 0, 65, 55), now_playing_action))
 
         tab_x = 222  # clear of go_now_playing's touch rect, which ends at x=205
@@ -352,7 +352,7 @@ class PlaylistsScreen:
         self.buttons.append(TouchButton((play_x - touch // 2, nav_cy - touch // 2, touch, touch), "toggle"))
         self.buttons.append(TouchButton((mute_x - touch // 2, nav_cy - touch // 2, touch, touch), "mute"))
 
-    def handle_touch(self, pos):
+    def handle_touch(self, pos, hold_secs=0):
         for btn in self.buttons:
             if btn.hit(pos):
                 return self._do_action(btn.action)

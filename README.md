@@ -58,6 +58,12 @@ card. Check with `aplay -l` (expect `sndrpihifiberry`) and
 `speaker-test -c2 -twav -l1`. The overlay loads whether or not the board is
 seated, so a listed card doesn't prove the hardware is connected.
 
+If output is too quiet (LMS/squeezelite), a DAC+ (PCM512x) board can use
+`dtoverlay=hifiberry-dacplus,24db_digital_gain` instead — it adds +24 dB of
+digital gain. Reboot after changing. Watch for clipping at high volume; back
+LMS/player volume off if it distorts. The plain `hifiberry-dac` overlay
+(PCM5102A) has no gain option.
+
 ### Power
 Use a real 5.1V / 2.5A+ supply. With the touchscreen + DAC on a Pi 3B, a 2A
 supply throttled at boot. Verify with `vcgencmd get_throttled` (want `0x0`).

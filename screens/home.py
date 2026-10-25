@@ -491,7 +491,7 @@ class HomeScreen:
                 (x, cell_y, size, size + gap_cover_name + name_h), f"play:{pick.get('uri')}"
             ))
 
-    def handle_touch(self, pos):
+    def handle_touch(self, pos, hold_secs=0):
         for btn in self.buttons:
             if btn.hit(pos):
                 return self._do_action(btn.action)

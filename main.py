@@ -248,7 +248,7 @@ def main():
                     continue  # likely a bounce-echo of the tap that just switched screens
 
                 prev_key = active_key
-                action = active_screen.handle_touch(pos)
+                action = active_screen.handle_touch(pos, hold_secs)
                 if action == "go_home":
                     active_key = "home"
                 elif action == "go_now_playing":
@@ -272,7 +272,7 @@ def main():
                     active_key = "squeeze_library"
                     active_source = "lms"
                 elif action == "played_playlist":
-                    is_spotify = hasattr(active_screen.player, "switch_output")
+                    is_spotify = hasattr(active_screen.player, "get_devices")
                     # Picking something new to play here didn't used to pause
                     # the other source — only the inline play/pause button
                     # did — so playing an LMS album while Spotify was still

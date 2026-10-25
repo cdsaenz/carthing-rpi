@@ -2,7 +2,7 @@
 LMS (Lyrion/Logitech Media Server) provider — talks to a squeezelite player
 over LMS's JSON-RPC API. Unlike Spotify, playback here is always local
 (squeezelite -> this Pi's own DAC), so there's no "on another device" concept
-and no switch_output method — NowPlayingScreen skips that button accordingly.
+and no get_devices method — NowPlayingScreen skips that button accordingly.
 """
 
 from io import BytesIO
@@ -48,8 +48,11 @@ class LMSProvider:
         if self._player_id:
             return True
         result = self._call("", ["players", "0", "100"])
+        # LMS keeps stale entries (e.g. a 00:00:00:00:00:00 ghost from a
+        # squeezelite that started before the network was up) under the same
+        # name, so only a currently connected player counts.
         for p in (result or {}).get("players_loop") or []:
-            if p.get("name") == self.player_name:
+            if p.get("name") == self.player_name and p.get("connected"):
                 self._player_id = p.get("playerid")
                 return True
         return False

@@ -42,7 +42,6 @@ class SpotifyProvider:
         # explicit name wins; otherwise anything named like "raspotify(...)",
         # which is the package's default naming.
         self.this_device_name = (this_device_name or "").strip().lower()
-        self._previous_device = None  # device that was active before we took over
 
         # Cover image cache — holds the full-size decoded image, keyed only
         # by URL; each get_cover() call resizes fresh from it. Caching the
@@ -426,30 +425,12 @@ class SpotifyProvider:
         params = {"device_id": device_id} if device_id else None
         return self._put("play", params=params, body={"context_uri": context_uri})
 
-    def switch_output(self):
-        """Toggle between this Pi and whichever device was playing before we
-        took over. Returns a short status line for the UI to show."""
-        devices = self.get_devices()
-        if devices is None:
-            return "Can't reach Spotify"
-
-        here = next((d for d in devices if self._is_this_device(d)), None)
-        if here is None or not here.get("id"):
-            print(f"[spotify] Pi not matched; account devices: {[d.get('name') for d in devices]}")
+    def play_here(self):
+        """Pull playback onto this Pi and start it, regardless of whatever
+        was last active elsewhere. Returns a short status line for the UI
+        to show."""
+        here_id = self._this_device_id()
+        if not here_id:
             return "Pi not in Spotify's device list"
-
-        active = next((d for d in devices if d.get("is_active")), None)
-
-        if active and active.get("id") == here["id"]:
-            prev = self._previous_device
-            target = next((d for d in devices if prev and d.get("id") == prev["id"]), None)
-            if target is None:
-                return "No other device to go back to"
-            ok = self.transfer_playback(target["id"])
-            return f"Back to {target.get('name') or 'previous device'}" if ok else "Transfer failed"
-
-        if active and active.get("id"):
-            self._previous_device = {"id": active["id"], "name": active.get("name", "")}
-        # Nothing active anywhere -> resume the last session here
-        ok = self.transfer_playback(here["id"], play=active is None)
+        ok = self.transfer_playback(here_id, play=True)
         return "Playing on this Pi" if ok else "Transfer failed"
