@@ -42,7 +42,8 @@ def _artist_overlap(album_artist, track_artists):
 
 
 class HomeScreen:
-    MINI_COVER = 240
+    MINI_COVER = 172
+    MINI_PROGRESS_W = 240
     COVER_RADIUS = 18
     MISS_TOLERANCE = 2  # consecutive empty polls before trusting "nothing
     # playing" — a single flaky poll shouldn't flash the mini card to idle.
@@ -297,6 +298,27 @@ class HomeScreen:
         return hit
 
     @staticmethod
+    def _draw_dot_bar(surface, x, y, w, h, progress, fill, dots, marker):
+        """Progress bar with one dot per hour/day of its window, so the fill
+        reads against the units. Dots contrast with whatever they sit on
+        (dark over the fill, light over the empty track). A small ▼ above the
+        bar sits at how far through the window we are *in time* — fill left of
+        it means under pace, right of it means ahead."""
+        progress = max(0.0, min(1.0, progress))
+        pygame.draw.rect(surface, theme.PROGRESS_BG, (x, y, w, h), border_radius=h // 2)
+        fill_w = int(w * progress)
+        if fill_w > 0:
+            pygame.draw.rect(surface, fill, (x, y, max(fill_w, h), h), border_radius=h // 2)
+        for k in range(dots):
+            cx = x + int(w * (k + 0.5) / dots)
+            on_fill = cx <= x + max(fill_w, h)
+            color = (10, 12, 18) if on_fill else (215, 215, 230)
+            pygame.draw.circle(surface, color, (cx, y + h // 2), 4)
+        if marker is not None:
+            mx = x + int(w * max(0.0, min(1.0, marker)))
+            pygame.draw.polygon(surface, (255, 255, 255), [(mx - 6, y - 9), (mx + 6, y - 9), (mx, y - 1)])
+
+    @staticmethod
     def _draw_burst(surface, cx, cy, d):
         """Small 8-ray burst in Claude orange."""
         for k in range(8):
@@ -314,10 +336,10 @@ class HomeScreen:
         return h
 
     def _draw_clock(self, surface, W, H, active_source="spotify"):
-        """Temp on top, big time in the middle, then date, MEP rate, the two
-        Claude usage rows and (while something's playing) the source switch
-        — the whole block vertically centered, using real glyph heights.
-        When idle, the switch moves to the top of the right panel instead.
+        """Temp on top, big time in the middle, then date, MEP rate and the
+        two Claude usage rows — the whole block vertically centered, using
+        real glyph heights. (The source switch lives at the top of the right
+        panel.)
         """
         left_cx = W // 4
         now = datetime.datetime.now()
@@ -328,19 +350,16 @@ class HomeScreen:
         mep_str = self._format_mep()
         claude_rows = self._claude_rows()
 
-        playing = bool(self.track_data if active_source == "spotify" else self.lms_track_data)
-
         gap_temp_feels = 8
         gap_feels_time = 20
         gap_temp_time = 28
         gap_time_date = 22
         gap_date_mep = 12
         gap_above_claude = 30
-        gap_claude_rows = 10
-        gap_text_bar = 6
-        claude_bar_h = 6
-        gap_above_switch = 24
-        switch_h = 48
+        gap_claude_rows = 8
+        gap_text_bar = 5
+        claude_bar_h = 16
+        marker_h = 10  # room above each bar for its time marker
 
         items = [(temp_str, self.f_temp, theme.ACCENT)]
         if feels_str:
@@ -353,11 +372,9 @@ class HomeScreen:
             gaps.append(gap_date_mep)
 
         total_h = sum(self._ink(f, t)[1] for t, f, _ in items) + sum(gaps)
-        for i, (label, pct, _) in enumerate(claude_rows):
+        for i, (label, *_) in enumerate(claude_rows):
             total_h += gap_above_claude if i == 0 else gap_claude_rows
-            total_h += self._ink(self.f_claude, label)[1] + gap_text_bar + claude_bar_h
-        if playing:
-            total_h += gap_above_switch + switch_h
+            total_h += self._ink(self.f_claude, label)[1] + gap_text_bar + marker_h + claude_bar_h
 
         y = (H - total_h) // 2
         for i, (text, font, color) in enumerate(items):
@@ -367,7 +384,7 @@ class HomeScreen:
 
         bar_w = 280
         icon_d, icon_gap = 19, 9
-        for i, (label, pct, fill) in enumerate(claude_rows):
+        for i, (label, pct, fill, dots, marker) in enumerate(claude_rows):
             y += gap_above_claude if i == 0 else gap_claude_rows
             # The burst icon leads the first row; the label shifts right to
             # keep icon + text centered together, and the icon is centered on
@@ -377,15 +394,9 @@ class HomeScreen:
             if i == 0:
                 label_w = self.f_claude.size(label)[0]
                 self._draw_burst(surface, left_cx + shift - label_w // 2 - icon_gap - icon_d // 2, y + ink_h // 2, icon_d)
-            y += self._draw_ink(surface, label, self.f_claude, theme.TEXT_SECONDARY, left_cx + shift, y) + gap_text_bar
-            draw_progress_bar(
-                surface, left_cx - bar_w // 2, y, bar_w, claude_bar_h,
-                min(1.0, pct / 100), theme.PROGRESS_BG, fill,
-            )
+            y += self._draw_ink(surface, label, self.f_claude, theme.TEXT_SECONDARY, left_cx + shift, y) + gap_text_bar + marker_h
+            self._draw_dot_bar(surface, left_cx - bar_w // 2, y, bar_w, claude_bar_h, pct / 100, fill, dots, marker)
             y += claude_bar_h
-
-        if playing:
-            self._draw_source_switch(surface, left_cx, y + gap_above_switch, active_source)
 
     def _format_mep(self):
         if self.mep_rate is None:
@@ -402,7 +413,7 @@ class HomeScreen:
         return f"{mins}m"
 
     def _claude_rows(self):
-        """[(label, pct)] for the session and weekly lines; empty when
+        """[(label, pct, color, dots, marker)] for the session and weekly lines; empty when
         there's no fresh data, so the meter just isn't drawn."""
         d = self.claude_data
         if not d:
@@ -412,9 +423,13 @@ class HomeScreen:
         # 100/7-per-day pace instead — orange when you're ahead of it.
         s_color = (255, 80, 80) if sp >= 90 else (255, 176, 32) if sp >= 70 else theme.ACCENT
         w_color = (255, 140, 0) if wp > d["week_budget"] else theme.ACCENT
+        # One dot per hour of the 5h session and per day of the week; the
+        # marker is how far through each window we are in time.
+        s_marker = 1 - d["session_resets_in"] / (5 * 3600)
+        w_marker = 1 - d["week_resets_in"] / (7 * 86400)
         return [
-            (f"Session {round(sp)}% · {self._format_span(d['session_resets_in'])}", sp, s_color),
-            (f"Week {round(wp)}% · {self._format_span(d['week_resets_in'])}", wp, w_color),
+            (f"Session {round(sp)}% · {self._format_span(d['session_resets_in'])}", sp, s_color, 5, s_marker),
+            (f"Week {round(wp)}% · {self._format_span(d['week_resets_in'])}", wp, w_color, 7, w_marker),
         ]
 
     def _format_temp(self):
@@ -451,6 +466,8 @@ class HomeScreen:
         title_h = self.f_mini_title.size(title)[1]
         artist_h = self.f_mini_artist.size(data["artists"])[1]
 
+        switch_h = 48
+        gap_switch_cover = 14
         gap_cover_title = 18
         gap_title_artist = 4
         gap_artist_progress = 16
@@ -460,10 +477,14 @@ class HomeScreen:
         controls_h = CTRL_R * 2
 
         total_h = (
-            cover_size + gap_cover_title + title_h + gap_title_artist + artist_h
+            switch_h + gap_switch_cover
+            + cover_size + gap_cover_title + title_h + gap_title_artist + artist_h
             + gap_artist_progress + progress_h + gap_progress_controls + controls_h
         )
         y = (H - total_h) // 2
+
+        self._draw_source_switch(surface, panel_cx, y, active_source)
+        y += switch_h + gap_switch_cover
 
         cover_x = panel_cx - cover_size // 2
         cover_y = y
@@ -482,7 +503,7 @@ class HomeScreen:
         render_text(surface, data["artists"], self.f_mini_artist, theme.ACCENT, panel_cx, y, anchor="center")
         y += artist_h + gap_artist_progress
 
-        prog_w = cover_size
+        prog_w = self.MINI_PROGRESS_W
         prog_x = panel_cx - prog_w // 2
         duration = max(1, data["duration_ms"])
         progress = data["progress_ms"] / duration
