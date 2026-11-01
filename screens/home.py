@@ -97,7 +97,7 @@ class HomeScreen:
         self.last_track_poll = 0
         self.track_poll_interval = 3
 
-        self.f_claude = load_font(theme.FONT_MEDIUM, 20)
+        self.f_claude = load_font(theme.FONT_MEDIUM, 25)
         self.f_time = load_font(theme.FONT_BOLD, theme.SIZE_CLOCK)
         self.f_date = load_font(theme.FONT_SEMIBOLD, theme.SIZE_DATE)
         self.f_temp = load_font(theme.FONT_MEDIUM, theme.SIZE_TEMP)
@@ -365,8 +365,8 @@ class HomeScreen:
             if i < len(gaps):
                 y += gaps[i]
 
-        bar_w = 230
-        icon_d, icon_gap = 16, 8
+        bar_w = 280
+        icon_d, icon_gap = 19, 9
         for i, (label, pct, fill) in enumerate(claude_rows):
             y += gap_above_claude if i == 0 else gap_claude_rows
             # The burst icon leads the first row; the label shifts right to
