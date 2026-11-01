@@ -16,6 +16,7 @@ Layout (800x480 landscape), both halves vertically centered as a block:
 └─────────────────────────────┴───────────────────────┘
 """
 
+import math
 import random
 import time
 import datetime
@@ -49,11 +50,12 @@ class HomeScreen:
     QUICK_PICK_COLS = 2
     QUICK_PICK_CYCLE_SECS = 420  # 7 min — a fresh set every so often, not so often it feels twitchy
 
-    def __init__(self, spotify, weather, dollar=None, lms=None):
+    def __init__(self, spotify, weather, dollar=None, lms=None, claude_usage=None):
         self.spotify = spotify
         self.weather = weather
         self.dollar = dollar
         self.lms = lms
+        self.claude_usage = claude_usage
         self.buttons = []
 
         self.track_data = None
@@ -87,9 +89,15 @@ class HomeScreen:
         self.last_mep_poll = 0
         self.mep_poll_interval = 120
 
+        self.claude_data = None
+        self._ink_cache = {}
+        self.last_claude_poll = 0
+        self.claude_poll_interval = 120
+
         self.last_track_poll = 0
         self.track_poll_interval = 3
 
+        self.f_claude = load_font(theme.FONT_MEDIUM, 20)
         self.f_time = load_font(theme.FONT_BOLD, theme.SIZE_CLOCK)
         self.f_date = load_font(theme.FONT_SEMIBOLD, theme.SIZE_DATE)
         self.f_temp = load_font(theme.FONT_MEDIUM, theme.SIZE_TEMP)
@@ -165,6 +173,12 @@ class HomeScreen:
             rate = self.dollar.get_mep_rate()
             if rate is not None:
                 self.mep_rate = rate
+
+        if self.claude_usage and now - self.last_claude_poll >= self.claude_poll_interval:
+            self.last_claude_poll = now
+            # Assigned even when None so a stale/failed fetch hides the meter
+            # instead of leaving an old number up.
+            self.claude_data = self.claude_usage.get_usage()
 
     def needs_fetch(self):
         """True if the next update() is about to re-poll (stale by more
@@ -269,10 +283,41 @@ class HomeScreen:
 
         return track_h
 
+    def _ink(self, font, text):
+        """(top offset, height) of the glyphs' actual pixels — the font's own
+        line box carries a lot of empty leading, which is what made the gaps
+        under the temp and the clock look so big."""
+        key = (id(font), text)
+        hit = self._ink_cache.get(key)
+        if hit is None:
+            if len(self._ink_cache) > 200:
+                self._ink_cache.clear()
+            r = font.render(text, True, (255, 255, 255)).get_bounding_rect()
+            hit = self._ink_cache[key] = (r.y, r.h)
+        return hit
+
+    @staticmethod
+    def _draw_burst(surface, cx, cy, d):
+        """Small 8-ray burst in Claude orange."""
+        for k in range(8):
+            a = k * math.pi / 4
+            pygame.draw.line(
+                surface, (255, 115, 40),
+                (cx + math.cos(a) * 2, cy + math.sin(a) * 2),
+                (cx + math.cos(a) * d / 2, cy + math.sin(a) * d / 2), 3,
+            )
+
+    def _draw_ink(self, surface, text, font, color, cx, y):
+        """Draw text centered on cx with its *ink* top at y; returns the ink height."""
+        top, h = self._ink(font, text)
+        render_text(surface, text, font, color, cx, y - top, anchor="center")
+        return h
+
     def _draw_clock(self, surface, W, H, active_source="spotify"):
-        """Temp on top, big time in the middle, date + MEP rate + source
-        switch at the bottom — the whole block vertically centered
-        (measured, not guessed).
+        """Temp on top, big time in the middle, then date, MEP rate, the two
+        Claude usage rows and (while something's playing) the source switch
+        — the whole block vertically centered, using real glyph heights.
+        When idle, the switch moves to the top of the right panel instead.
         """
         left_cx = W // 4
         now = datetime.datetime.now()
@@ -281,56 +326,96 @@ class HomeScreen:
         temp_str = self._format_temp()
         feels_str = self._format_feels()
         mep_str = self._format_mep()
+        claude_rows = self._claude_rows()
 
-        gap_temp_feels = 2
-        gap_feels_time = 6
-        gap_temp_time = 4
-        gap_time_date = 16
-        gap_date_mep = 10
-        gap_mep_switch = 20
+        playing = bool(self.track_data if active_source == "spotify" else self.lms_track_data)
+
+        gap_temp_feels = 8
+        gap_feels_time = 20
+        gap_temp_time = 28
+        gap_time_date = 22
+        gap_date_mep = 12
+        gap_above_claude = 30
+        gap_claude_rows = 10
+        gap_text_bar = 6
+        claude_bar_h = 6
+        gap_above_switch = 24
         switch_h = 48
 
-        temp_h = self.f_temp.size(temp_str)[1]
-        feels_h = self.f_feels.size(feels_str)[1] if feels_str else 0
-        time_h = self.f_time.size(time_str)[1]
-        date_h = self.f_date.size(date_str)[1]
-        mep_h = self.f_mep.size(mep_str)[1] if mep_str else 0
-
-        total_h = temp_h + gap_temp_time + time_h + gap_time_date + date_h + gap_mep_switch + switch_h
+        items = [(temp_str, self.f_temp, theme.ACCENT)]
         if feels_str:
-            total_h += gap_temp_feels + feels_h + gap_feels_time - gap_temp_time
+            items.append((feels_str, self.f_feels, theme.TEXT_SECONDARY))
+        items += [(time_str, self.f_time, theme.TEXT_PRIMARY), (date_str, self.f_date, theme.TEXT_SECONDARY)]
+        gaps = [gap_temp_feels, gap_feels_time] if feels_str else [gap_temp_time]
+        gaps.append(gap_time_date)
         if mep_str:
-            total_h += gap_date_mep + mep_h
+            items.append((mep_str, self.f_mep, theme.ACCENT))
+            gaps.append(gap_date_mep)
+
+        total_h = sum(self._ink(f, t)[1] for t, f, _ in items) + sum(gaps)
+        for i, (label, pct, _) in enumerate(claude_rows):
+            total_h += gap_above_claude if i == 0 else gap_claude_rows
+            total_h += self._ink(self.f_claude, label)[1] + gap_text_bar + claude_bar_h
+        if playing:
+            total_h += gap_above_switch + switch_h
 
         y = (H - total_h) // 2
-        render_text(surface, temp_str, self.f_temp, theme.ACCENT, left_cx, y, anchor="center")
-        y += temp_h
+        for i, (text, font, color) in enumerate(items):
+            y += self._draw_ink(surface, text, font, color, left_cx, y)
+            if i < len(gaps):
+                y += gaps[i]
 
-        if feels_str:
-            y += gap_temp_feels
-            render_text(surface, feels_str, self.f_feels, theme.TEXT_SECONDARY, left_cx, y, anchor="center")
-            y += feels_h + gap_feels_time
-        else:
-            y += gap_temp_time
+        bar_w = 230
+        icon_d, icon_gap = 16, 8
+        for i, (label, pct, fill) in enumerate(claude_rows):
+            y += gap_above_claude if i == 0 else gap_claude_rows
+            # The burst icon leads the first row; the label shifts right to
+            # keep icon + text centered together, and the icon is centered on
+            # the text's real ink height.
+            shift = (icon_d + icon_gap) // 2 if i == 0 else 0
+            ink_h = self._ink(self.f_claude, label)[1]
+            if i == 0:
+                label_w = self.f_claude.size(label)[0]
+                self._draw_burst(surface, left_cx + shift - label_w // 2 - icon_gap - icon_d // 2, y + ink_h // 2, icon_d)
+            y += self._draw_ink(surface, label, self.f_claude, theme.TEXT_SECONDARY, left_cx + shift, y) + gap_text_bar
+            draw_progress_bar(
+                surface, left_cx - bar_w // 2, y, bar_w, claude_bar_h,
+                min(1.0, pct / 100), theme.PROGRESS_BG, fill,
+            )
+            y += claude_bar_h
 
-        render_text(surface, time_str, self.f_time, theme.TEXT_PRIMARY, left_cx, y, anchor="center")
-        y += time_h + gap_time_date
-
-        render_text(surface, date_str, self.f_date, theme.TEXT_SECONDARY, left_cx, y, anchor="center")
-        y += date_h
-
-        if mep_str:
-            y += gap_date_mep
-            render_text(surface, mep_str, self.f_mep, theme.ACCENT, left_cx, y, anchor="center")
-            y += mep_h
-
-        y += gap_mep_switch
-        self._draw_source_switch(surface, left_cx, y, active_source)
+        if playing:
+            self._draw_source_switch(surface, left_cx, y + gap_above_switch, active_source)
 
     def _format_mep(self):
         if self.mep_rate is None:
             return ""
         return f"MEP ${round(self.mep_rate)}"
+
+    @staticmethod
+    def _format_span(secs):
+        mins = int(secs // 60)
+        if mins >= 24 * 60:
+            return f"{mins // 1440}d {mins % 1440 // 60}h"
+        if mins >= 60:
+            return f"{mins // 60}h {mins % 60:02d}m"
+        return f"{mins}m"
+
+    def _claude_rows(self):
+        """[(label, pct)] for the session and weekly lines; empty when
+        there's no fresh data, so the meter just isn't drawn."""
+        d = self.claude_data
+        if not d:
+            return []
+        sp, wp = d["session_pct"], d["week_pct"]
+        # Session fills toward amber/red; the week is judged against an even
+        # 100/7-per-day pace instead — orange when you're ahead of it.
+        s_color = (255, 80, 80) if sp >= 90 else (255, 176, 32) if sp >= 70 else theme.ACCENT
+        w_color = (255, 140, 0) if wp > d["week_budget"] else theme.ACCENT
+        return [
+            (f"Session {round(sp)}% · {self._format_span(d['session_resets_in'])}", sp, s_color),
+            (f"Week {round(wp)}% · {self._format_span(d['week_resets_in'])}", wp, w_color),
+        ]
 
     def _format_temp(self):
         if not self.weather_data:
@@ -450,6 +535,7 @@ class HomeScreen:
                 surface, "Nothing playing", self.f_mini_artist, theme.TEXT_DIM,
                 panel_cx, (H - title_h) // 2, anchor="center",
             )
+            self._draw_source_switch(surface, panel_cx, (H - title_h) // 2 - 80, active_source)
             return
 
         size = self.QUICK_PICK_SIZE
@@ -457,9 +543,9 @@ class HomeScreen:
         n = len(self.quick_picks)
         rows = (n + cols - 1) // cols
         gap_x, gap_y = 20, 16
-        title_h = self.f_mini_artist.size("Pick something")[1]
+        title_h = 48  # the source switch's height — it sits where "Pick something" used to
         name_h = self.f_mini_artist.size("Ay")[1]
-        gap_title_grid = 18
+        gap_title_grid = 14
         gap_cover_name = 8
         row_h = size + gap_cover_name + name_h
 
@@ -468,7 +554,7 @@ class HomeScreen:
         start_x = panel_cx - total_w // 2
         y = (H - total_h) // 2
 
-        render_text(surface, "Pick something", self.f_mini_artist, theme.TEXT_DIM, panel_cx, y, anchor="center")
+        self._draw_source_switch(surface, panel_cx, y, active_source)
         y += title_h + gap_title_grid
 
         for i, pick in enumerate(self.quick_picks):

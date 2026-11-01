@@ -114,3 +114,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable carthing
 sudo systemctl start carthing
 ```
+
+## Optional: Claude usage meter
+Shows your Claude session (5h) and weekly usage on the home screen. The week bar turns
+orange when you are ahead of an even 100/7%-per-day pace. Anthropic publishes no
+official API for subscription limits, so this uses an undocumented endpoint that can
+change without notice; the meter just hides itself if the data goes stale.
+
+1. On an always-on machine with Claude Code logged in, run
+   `scripts/claude_usage_collect.py` from cron (e.g. every 3 min) and serve the
+   `public/` folder it writes next to itself (e.g. `python3 -m http.server 8787`).
+   It reads Claude Code's token read-only and never writes it out.
+2. Set `CLAUDE_USAGE_URL=http://<that-machine>:8787/usage.json` in the Pi's `.env`.
+   Leave it empty to keep the meter off.
+
+Keep the server on your LAN only.

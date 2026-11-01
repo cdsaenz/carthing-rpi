@@ -4,6 +4,7 @@ CarThing — Spotify touch player for RPi 3B + 5" HDMI LCD (800x480).
 """
 
 import os
+import signal
 import sys
 import threading
 import time
@@ -20,6 +21,7 @@ from providers.spotify import SpotifyProvider
 from providers.weather import WeatherProvider
 from providers.dollar import DollarProvider
 from providers.lms import LMSProvider
+from providers.claude_usage import ClaudeUsageProvider
 from screens.now_playing import NowPlayingScreen
 from screens.home import HomeScreen
 from screens.playlists import PlaylistsScreen
@@ -133,6 +135,9 @@ def main():
     # MEP dollar rate — an Argentina-specific exchange rate most people
     # cloning this won't want; off unless explicitly enabled.
     dollar = DollarProvider() if os.getenv("SHOW_MEP_RATE", "").lower() == "true" else None
+    # Claude usage meter — optional; needs CLAUDE_USAGE_URL pointing at the
+    # collector's usage.json (scripts/claude_usage_collect.py).
+    claude_usage = ClaudeUsageProvider(os.getenv("CLAUDE_USAGE_URL", "")) if os.getenv("CLAUDE_USAGE_URL") else None
     lms = LMSProvider(
         server_ip=os.getenv("LMS_SERVER_IP", "192.168.1.211"),
         player_name=os.getenv("LMS_PLAYER_NAME", "rpi3b"),
@@ -142,7 +147,7 @@ def main():
     screens = {
         "now_playing": NowPlayingScreen(spotify),
         "squeeze": NowPlayingScreen(lms),
-        "home": HomeScreen(spotify, weather, dollar, lms),
+        "home": HomeScreen(spotify, weather, dollar, lms, claude_usage),
         "playlists": PlaylistsScreen(spotify),
         "squeeze_library": PlaylistsScreen(lms),
     }
@@ -177,6 +182,13 @@ def main():
     # this is just the state that tracks which one's "active" for that.
     SOURCE_PLAYER = {"spotify": spotify, "lms": lms}
     active_source = "spotify"
+
+    # `kill -USR1 <pid>` saves the next frame to SCREENSHOT_PATH — the
+    # KMSDRM display has no framebuffer to grab from outside the app.
+    SCREENSHOT_PATH = "/tmp/carthing-screenshot.png"
+    screenshot_requested = threading.Event()
+    if hasattr(signal, "SIGUSR1"):
+        signal.signal(signal.SIGUSR1, lambda *_: screenshot_requested.set())
 
     print(f"[main] CarThing running at {WIDTH}x{HEIGHT}")
 
@@ -341,6 +353,9 @@ def main():
         # Center/size chosen so the icon's visible rays stay left of x=40 —
         # Now Playing's cover art starts right there.
         draw_brightness_icon(screen, (22, 22), 30, icon_color)
+        if screenshot_requested.is_set():
+            screenshot_requested.clear()
+            pygame.image.save(screen, SCREENSHOT_PATH)
         pygame.display.flip()
 
         # ~30 FPS is plenty for this UI
