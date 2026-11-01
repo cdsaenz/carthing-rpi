@@ -1,5 +1,7 @@
 # CarThing
 
+![Home screen](docs/screenshot.png)
+
 A touchscreen media console for a Raspberry Pi 3B + 5" HDMI LCD, styled
 after Spotify's Car Thing. Runs full-screen with pygame-ce over KMSDRM (no
 desktop environment), and plays through a HiFiBerry DAC.
