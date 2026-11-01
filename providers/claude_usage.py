@@ -34,10 +34,12 @@ class ClaudeUsageProvider:
             # faster than an even spread.
             week_start = datetime.fromisoformat(d["week_resets_at"]) - timedelta(days=7)
             day_n = min(7, max(1, int((now - week_start).total_seconds() // 86400) + 1))
+            # No active 5h session (idle) → the API sends resets_at = null.
+            s_at = d.get("session_resets_at")
             return {
                 "week_budget": day_n * 100 / 7,
-                "session_pct": float(d["session_pct"]),
-                "session_resets_in": max(0, (datetime.fromisoformat(d["session_resets_at"]) - now).total_seconds()),
+                "session_pct": float(d["session_pct"] or 0),
+                "session_resets_in": max(0, (datetime.fromisoformat(s_at) - now).total_seconds()) if s_at else None,
                 "week_pct": float(d["week_pct"]),
                 "week_resets_in": max(0, (datetime.fromisoformat(d["week_resets_at"]) - now).total_seconds()),
             }

@@ -425,10 +425,12 @@ class HomeScreen:
         w_color = (255, 140, 0) if wp > d["week_budget"] else theme.ACCENT
         # One dot per hour of the 5h session and per day of the week; the
         # marker is how far through each window we are in time.
-        s_marker = 1 - d["session_resets_in"] / (5 * 3600)
+        sr = d["session_resets_in"]
+        s_marker = None if sr is None else 1 - sr / (5 * 3600)
+        s_span = "idle" if sr is None else self._format_span(sr)
         w_marker = 1 - d["week_resets_in"] / (7 * 86400)
         return [
-            (f"Session {round(sp)}% · {self._format_span(d['session_resets_in'])}", sp, s_color, 5, s_marker),
+            (f"Session {round(sp)}% · {s_span}", sp, s_color, 5, s_marker),
             (f"Week {round(wp)}% · {self._format_span(d['week_resets_in'])}", wp, w_color, 7, w_marker),
         ]
 
