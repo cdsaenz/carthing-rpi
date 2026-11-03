@@ -205,8 +205,11 @@ class SpotifyProvider:
                 json=body,
                 timeout=10,
             )
+            if r.status_code not in (200, 202, 204):
+                print(f"[spotify] PUT /{endpoint} -> {r.status_code} {r.text[:160]}")
             return r.status_code in (200, 202, 204)
-        except Exception:
+        except Exception as e:
+            print(f"[spotify] PUT /{endpoint} error: {e}")
             return False
 
     def _post(self, endpoint, params=None):
@@ -423,7 +426,14 @@ class SpotifyProvider:
         elsewhere."""
         device_id = self._this_device_id()
         params = {"device_id": device_id} if device_id else None
-        return self._put("play", params=params, body={"context_uri": context_uri})
+        if self._put("play", params=params, body={"context_uri": context_uri}):
+            return True
+        # Spotify answered but couldn't start it (device asleep/idle): wake
+        # the Pi with an explicit transfer, then try once more.
+        if device_id and self.transfer_playback(device_id, play=False):
+            time.sleep(1.5)
+            return self._put("play", params=params, body={"context_uri": context_uri})
+        return False
 
     def play_here(self):
         """Pull playback onto this Pi and start it, regardless of whatever
