@@ -226,6 +226,24 @@ def draw_shuffle_icon(surface, center, size, color, line_w=3):
     pygame.draw.line(surface, color, tip2, (tip2[0], tip2[1] - tick), line_w)
 
 
+def draw_heart_icon(surface, center, size, color, filled=True, line_w=3):
+    """Heart from the classic parametric curve — filled when saved, outline
+    when not."""
+    import math
+    cx, cy = center
+    k = size / 34.0
+    pts = []
+    for i in range(120):
+        t = i * 2 * math.pi / 120
+        x = 16 * math.sin(t) ** 3
+        y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+        pts.append((cx + x * k, cy - (y - 1.5) * k))
+    if filled:
+        pygame.draw.polygon(surface, color, pts)
+    else:
+        pygame.draw.polygon(surface, color, pts, line_w)
+
+
 def draw_refresh_icon(surface, center, size, color, line_w=3):
     """One hooked arrow — up the left edge, a rounded corner, across the
     top, ending in a right-pointing arrowhead. The single-arm half of the

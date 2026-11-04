@@ -420,6 +420,52 @@ class SpotifyProvider:
 
         return items
 
+    # ── Save / unsave an album ────────────────────
+    # Spotify moved library calls from /me/albums?ids= to /me/library?uris=;
+    # try the newer one first and fall back to the older on 404/405/410.
+
+    def _library_call(self, method, new_path, old_path, uri):
+        """(status, json) for a library call on an album URI; status None on
+        network failure."""
+        if not self._ensure_token():
+            return None, None
+        album_id = uri.split(":")[-1]
+        for path, params in ((new_path, {"uris": uri}), (old_path, {"ids": album_id})):
+            try:
+                r = requests.request(
+                    method, f"https://api.spotify.com/v1/{path}",
+                    headers=self._auth_header(), params=params, timeout=10,
+                )
+            except Exception as e:
+                print(f"[spotify] {method} {path} error: {e}")
+                return None, None
+            if r.status_code in (404, 405, 410):
+                continue
+            if r.status_code >= 400:
+                print(f"[spotify] {method} {path} -> {r.status_code} {r.text[:160]}")
+            try:
+                return r.status_code, r.json() if r.text else None
+            except ValueError:
+                return r.status_code, None
+        return 404, None
+
+    def is_album_saved(self, album_uri):
+        """True/False, or None if it couldn't be determined."""
+        if not album_uri:
+            return None
+        status, body = self._library_call("GET", "me/library/contains", "me/albums/contains", album_uri)
+        if status == 200 and isinstance(body, list) and body:
+            return bool(body[0])
+        return None
+
+    def set_album_saved(self, album_uri, saved):
+        """Save or remove an album. Returns "ok", "scope" (token lacks
+        user-library-modify — run scripts/reauth_spotify.py) or "error"."""
+        status, _ = self._library_call("PUT" if saved else "DELETE", "me/library", "me/albums", album_uri)
+        if status in (200, 201, 204):
+            return "ok"
+        return "scope" if status in (401, 403) else "error"
+
     def play_context(self, context_uri):
         """Start a playlist or artist context, targeting this Pi's device
         explicitly so it plays here regardless of whatever was last active

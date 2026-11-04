@@ -29,7 +29,7 @@ from ui import theme
 from ui.components import (
     load_font, render_text, render_lines, wrap_text, draw_progress_bar, TouchButton,
     draw_play_icon, draw_pause_icon, draw_skip_icon, draw_minus_icon, draw_plus_icon,
-    draw_clock_icon, draw_cast_icon, draw_shuffle_icon,
+    draw_clock_icon, draw_cast_icon, draw_shuffle_icon, draw_heart_icon,
 )
 from providers.spotify import fmt_ms
 
@@ -57,6 +57,8 @@ class NowPlayingScreen:
         self.device_overlay_open = False
         self.device_entries = []  # last fetched Spotify Connect device list, for the overlay
         self.device_buttons = []
+        self.album_saved = None  # Spotify only: is the playing album in the library (None = unknown)
+        self._saved_for = None   # album uri album_saved was fetched for
         self.library_shuffle_on = False  # LMS-only third shuffle state; tracked here
         # since LMS has no query to read RandomPlay's status back reliably
 
@@ -110,6 +112,11 @@ class NowPlayingScreen:
             old_url = (self.track_data or {}).get("cover_url")
             self.track_data = data
             self.volume_percent = data.get("volume_percent", self.volume_percent)
+
+            # New album? Look up whether it's saved (Spotify only).
+            if hasattr(self.player, "is_album_saved") and data.get("album_uri") != self._saved_for:
+                self._saved_for = data.get("album_uri")
+                self.album_saved = self.player.is_album_saved(self._saved_for)
 
             # New track? Update cover + palette
             if data["cover_url"] != old_url:
@@ -283,6 +290,19 @@ class NowPlayingScreen:
             (shuffle_x - SHUFFLE_TOUCH // 2, shuffle_y - SHUFFLE_TOUCH // 2, SHUFFLE_TOUCH, SHUFFLE_TOUCH),
             "shuffle",
         ))
+
+        # Heart — Spotify only, just left of shuffle: save/remove this album.
+        if hasattr(self.player, "set_album_saved") and data.get("album_uri"):
+            heart_x = shuffle_x - 70
+            saved = bool(self.album_saved)
+            draw_heart_icon(
+                surface, (heart_x, shuffle_y), 38,
+                theme.ACCENT if saved else theme.TEXT_SECONDARY, filled=saved,
+            )
+            self.buttons.append(TouchButton(
+                (heart_x - SHUFFLE_TOUCH // 2, shuffle_y - SHUFFLE_TOUCH // 2, SHUFFLE_TOUCH, SHUFFLE_TOUCH),
+                "save_album",
+            ))
 
         # ── Progress bar ─────────────────────
         prog_x = COVER_X
@@ -508,6 +528,18 @@ class NowPlayingScreen:
             self._show_toast(self.player.play_here(), secs=2.5)
             # Spotify takes a moment to report the new active device; look again shortly
             self.last_poll = time.time() - self.poll_interval + 1.5
+        elif action == "save_album":
+            uri = self.track_data.get("album_uri")
+            if uri and hasattr(self.player, "set_album_saved"):
+                want = not self.album_saved
+                result = self.player.set_album_saved(uri, want)
+                if result == "ok":
+                    self.album_saved = want
+                    self._show_toast("Album saved" if want else "Album removed")
+                elif result == "scope":
+                    self._show_toast("Re-run reauth_spotify.py", secs=3)
+                else:
+                    self._show_toast("Couldn't update library")
         elif action == "shuffle":
             if hasattr(self.player, "toggle_library_shuffle"):
                 # LMS gets a 3-way cycle: off -> shuffle queue -> shuffle

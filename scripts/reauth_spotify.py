@@ -34,7 +34,7 @@ REDIRECT_URI = ""  # <-- fill in: must exactly match what's registered for this 
 # new token doesn't lose anything the old one already had.
 SCOPES = (
     "user-read-playback-state user-modify-playback-state user-read-currently-playing "
-    "playlist-read-private playlist-read-collaborative user-follow-read user-library-read"
+    "playlist-read-private playlist-read-collaborative user-follow-read user-library-read user-library-modify"
 )
 
 
